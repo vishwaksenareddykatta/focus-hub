@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, ChevronRight, ChevronDown, BookOpen, Trash2, FileText, Check } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { Plus, ChevronRight, ChevronDown, BookOpen, Trash2, FileText, Check, Pencil, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -27,10 +28,12 @@ type Chapter = {
 type Subject = {
   id: string;
   name: string;
+  user_id: string;
   chapters: Chapter[];
 };
 
 const Studies = () => {
+  const { user } = useAuth();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [expandedSubjects, setExpandedSubjects] = useState<Set<string>>(new Set());
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
@@ -41,6 +44,9 @@ const Studies = () => {
   const [newChapterName, setNewChapterName] = useState("");
   const [newTopicName, setNewTopicName] = useState("");
   const [editNotes, setEditNotes] = useState<{ id: string; notes: string } | null>(null);
+  const [editingSubject, setEditingSubject] = useState<{ id: string; name: string } | null>(null);
+  const [editingChapter, setEditingChapter] = useState<{ id: string; name: string } | null>(null);
+  const [editingTopic, setEditingTopic] = useState<{ id: string; name: string } | null>(null);
 
   const fetchData = async () => {
     const { data: subjects } = await supabase.from("subjects").select("*").order("created_at");
@@ -49,24 +55,21 @@ const Studies = () => {
 
     if (!subjects) return;
 
-    const mapped: Subject[] = subjects.map((s) => ({
+    setSubjects(subjects.map((s) => ({
       ...s,
       chapters: (chapters || [])
         .filter((c) => c.subject_id === s.id)
-        .map((c) => ({
-          ...c,
-          topics: (topics || []).filter((t) => t.chapter_id === c.id),
-        })),
-    }));
-
-    setSubjects(mapped);
+        .map((c) => ({ ...c, topics: (topics || []).filter((t) => t.chapter_id === c.id) })),
+    })));
   };
 
   useEffect(() => { fetchData(); }, []);
 
+  const isOwner = (subject: Subject) => subject.user_id === user?.id;
+
   const addSubject = async () => {
-    if (!newSubjectName.trim()) return;
-    await supabase.from("subjects").insert({ name: newSubjectName.trim() });
+    if (!newSubjectName.trim() || !user) return;
+    await supabase.from("subjects").insert({ name: newSubjectName.trim(), user_id: user.id });
     setNewSubjectName("");
     setAddSubjectOpen(false);
     fetchData();
@@ -104,8 +107,39 @@ const Studies = () => {
     fetchData();
   };
 
+  const saveSubjectEdit = async () => {
+    if (!editingSubject) return;
+    await supabase.from("subjects").update({ name: editingSubject.name }).eq("id", editingSubject.id);
+    setEditingSubject(null);
+    fetchData();
+  };
+
+  const saveChapterEdit = async () => {
+    if (!editingChapter) return;
+    await supabase.from("chapters").update({ name: editingChapter.name }).eq("id", editingChapter.id);
+    setEditingChapter(null);
+    fetchData();
+  };
+
+  const saveTopicEdit = async () => {
+    if (!editingTopic) return;
+    await supabase.from("topics").update({ name: editingTopic.name }).eq("id", editingTopic.id);
+    setEditingTopic(null);
+    fetchData();
+  };
+
   const deleteSubject = async (id: string) => {
     await supabase.from("subjects").delete().eq("id", id);
+    fetchData();
+  };
+
+  const deleteChapter = async (id: string) => {
+    await supabase.from("chapters").delete().eq("id", id);
+    fetchData();
+  };
+
+  const deleteTopic = async (id: string) => {
+    await supabase.from("topics").delete().eq("id", id);
     fetchData();
   };
 
@@ -114,6 +148,207 @@ const Studies = () => {
     if (topics.length === 0) return 0;
     return Math.round((topics.filter((t) => t.completed).length / topics.length) * 100);
   };
+
+  const mySubjects = subjects.filter((s) => s.user_id === user?.id);
+  const otherSubjects = subjects.filter((s) => s.user_id !== user?.id);
+
+  const renderSubjectList = (list: Subject[], readOnly: boolean) => (
+    <div className="space-y-3">
+      {list.map((subject) => {
+        const pct = subjectCompletion(subject);
+        const isExpanded = expandedSubjects.has(subject.id);
+
+        return (
+          <div key={subject.id} className={cn("card-surface overflow-hidden", readOnly && "opacity-90")}>
+            {/* Subject header */}
+            <div
+              className="flex items-center gap-3 p-4 cursor-pointer hover:bg-muted/40 transition-colors"
+              onClick={() => {
+                const next = new Set(expandedSubjects);
+                isExpanded ? next.delete(subject.id) : next.add(subject.id);
+                setExpandedSubjects(next);
+              }}
+            >
+              {isExpanded ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+              <BookOpen className="w-4 h-4 text-primary" />
+              {editingSubject?.id === subject.id ? (
+                <Input
+                  value={editingSubject.name}
+                  onChange={(e) => setEditingSubject({ ...editingSubject, name: e.target.value })}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => { if (e.key === "Enter") saveSubjectEdit(); }}
+                  className="h-7 text-sm bg-muted border-border flex-1"
+                />
+              ) : (
+                <span className="font-medium flex-1">{subject.name}</span>
+              )}
+              {readOnly && <Eye className="w-3.5 h-3.5 text-muted-foreground" />}
+              <span className="text-xs text-muted-foreground mr-2">{pct}%</span>
+              <div className="w-20"><Progress value={pct} className="h-1.5" /></div>
+              {!readOnly && (
+                <>
+                  <button onClick={(e) => {
+                    e.stopPropagation();
+                    if (editingSubject?.id === subject.id) saveSubjectEdit();
+                    else setEditingSubject({ id: subject.id, name: subject.name });
+                  }} className="ml-1 text-muted-foreground hover:text-primary transition-colors">
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); deleteSubject(subject.id); }} className="ml-1 text-muted-foreground hover:text-destructive transition-colors">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* Chapters */}
+            {isExpanded && (
+              <div className="border-t border-border">
+                {subject.chapters.map((chapter) => {
+                  const chapterExpanded = expandedChapters.has(chapter.id);
+                  const chapterPct = chapter.topics.length > 0
+                    ? Math.round((chapter.topics.filter((t) => t.completed).length / chapter.topics.length) * 100)
+                    : 0;
+
+                  return (
+                    <div key={chapter.id} className="border-b border-border last:border-0">
+                      <div
+                        className="flex items-center gap-3 px-8 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
+                        onClick={() => {
+                          const next = new Set(expandedChapters);
+                          chapterExpanded ? next.delete(chapter.id) : next.add(chapter.id);
+                          setExpandedChapters(next);
+                        }}
+                      >
+                        {chapterExpanded ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />}
+                        {editingChapter?.id === chapter.id ? (
+                          <Input
+                            value={editingChapter.name}
+                            onChange={(e) => setEditingChapter({ ...editingChapter, name: e.target.value })}
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => { if (e.key === "Enter") saveChapterEdit(); }}
+                            className="h-6 text-xs bg-muted border-border flex-1"
+                          />
+                        ) : (
+                          <span className="text-sm font-medium flex-1">{chapter.name}</span>
+                        )}
+                        <span className="text-xs text-muted-foreground mr-2">{chapterPct}% · {chapter.topics.length} topics</span>
+                        {!readOnly && (
+                          <>
+                            <button onClick={(e) => {
+                              e.stopPropagation();
+                              if (editingChapter?.id === chapter.id) saveChapterEdit();
+                              else setEditingChapter({ id: chapter.id, name: chapter.name });
+                            }} className="text-muted-foreground hover:text-primary transition-colors">
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); deleteChapter(chapter.id); }} className="text-muted-foreground hover:text-destructive transition-colors">
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+
+                      {chapterExpanded && (
+                        <div className="px-12 pb-3 space-y-1">
+                          {chapter.topics.map((topic) => (
+                            <div key={topic.id} className="flex items-center gap-3 py-2 group">
+                              {!readOnly ? (
+                                <button
+                                  onClick={() => toggleTopic(topic)}
+                                  className={cn(
+                                    "w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-all",
+                                    topic.completed
+                                      ? "bg-primary border-primary"
+                                      : "border-muted-foreground/40 hover:border-primary"
+                                  )}
+                                >
+                                  {topic.completed && <Check className="w-2.5 h-2.5 text-primary-foreground" />}
+                                </button>
+                              ) : (
+                                <div className={cn("w-4 h-4 rounded border flex items-center justify-center shrink-0",
+                                  topic.completed ? "bg-primary border-primary" : "border-muted-foreground/40")}>
+                                  {topic.completed && <Check className="w-2.5 h-2.5 text-primary-foreground" />}
+                                </div>
+                              )}
+                              {editingTopic?.id === topic.id ? (
+                                <div className="flex-1 flex gap-2">
+                                  <Input value={editingTopic.name} onChange={(e) => setEditingTopic({ ...editingTopic, name: e.target.value })}
+                                    className="h-6 text-xs bg-muted border-border flex-1" onKeyDown={(e) => { if (e.key === "Enter") saveTopicEdit(); }} />
+                                  <Button size="sm" variant="ghost" onClick={saveTopicEdit} className="h-6 text-xs">Save</Button>
+                                </div>
+                              ) : (
+                                <span className={cn("text-sm flex-1", topic.completed && "line-through text-muted-foreground")}>
+                                  {topic.name}
+                                </span>
+                              )}
+                              {topic.completed_at && (
+                                <span className="text-xs text-muted-foreground">
+                                  {new Date(topic.completed_at).toLocaleDateString()}
+                                </span>
+                              )}
+                              {!readOnly && editingTopic?.id !== topic.id && (
+                                <>
+                                  <button onClick={() => setEditNotes({ id: topic.id, notes: topic.notes || "" })}
+                                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary transition-all">
+                                    <FileText className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button onClick={() => setEditingTopic({ id: topic.id, name: topic.name })}
+                                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary transition-all">
+                                    <Pencil className="w-3 h-3" />
+                                  </button>
+                                  <button onClick={() => deleteTopic(topic.id)}
+                                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all">
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          ))}
+
+                          {!readOnly && (
+                            <Dialog open={addTopicOpen === chapter.id} onOpenChange={(o) => setAddTopicOpen(o ? chapter.id : null)}>
+                              <DialogTrigger asChild>
+                                <button className="flex items-center gap-2 text-xs text-muted-foreground hover:text-primary transition-colors py-1 mt-1">
+                                  <Plus className="w-3 h-3" /> Add Topic
+                                </button>
+                              </DialogTrigger>
+                              <DialogContent className="bg-card border-border">
+                                <DialogHeader><DialogTitle>Add Topic</DialogTitle></DialogHeader>
+                                <Input placeholder="Topic name" value={newTopicName} onChange={(e) => setNewTopicName(e.target.value)} className="bg-muted border-border" onKeyDown={(e) => e.key === "Enter" && addTopic(chapter.id)} />
+                                <Button onClick={() => addTopic(chapter.id)} className="gradient-primary text-primary-foreground">Add Topic</Button>
+                              </DialogContent>
+                            </Dialog>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {!readOnly && (
+                  <div className="px-8 py-3">
+                    <Dialog open={addChapterOpen === subject.id} onOpenChange={(o) => setAddChapterOpen(o ? subject.id : null)}>
+                      <DialogTrigger asChild>
+                        <button className="flex items-center gap-2 text-xs text-muted-foreground hover:text-primary transition-colors">
+                          <Plus className="w-3 h-3" /> Add Chapter
+                        </button>
+                      </DialogTrigger>
+                      <DialogContent className="bg-card border-border">
+                        <DialogHeader><DialogTitle>Add Chapter to {subject.name}</DialogTitle></DialogHeader>
+                        <Input placeholder="Chapter name" value={newChapterName} onChange={(e) => setNewChapterName(e.target.value)} className="bg-muted border-border" onKeyDown={(e) => e.key === "Enter" && addChapter(subject.id)} />
+                        <Button onClick={() => addChapter(subject.id)} className="gradient-primary text-primary-foreground">Add Chapter</Button>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 
   return (
     <div className="p-8 space-y-6 max-w-4xl">
@@ -136,135 +371,26 @@ const Studies = () => {
         </Dialog>
       </div>
 
-      <div className="space-y-3">
-        {subjects.length === 0 && (
+      {/* My Studies */}
+      <div>
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">My Studies</h2>
+        {mySubjects.length === 0 ? (
           <div className="card-surface p-12 text-center text-muted-foreground">
             <BookOpen className="w-8 h-8 mx-auto mb-3 opacity-40" />
-            <p className="text-sm">No subjects yet. Add your first subject to get started.</p>
+            <p className="text-sm">No subjects yet. Add your first subject.</p>
           </div>
-        )}
-
-        {subjects.map((subject) => {
-          const pct = subjectCompletion(subject);
-          const isExpanded = expandedSubjects.has(subject.id);
-
-          return (
-            <div key={subject.id} className="card-surface overflow-hidden">
-              {/* Subject header */}
-              <div
-                className="flex items-center gap-3 p-4 cursor-pointer hover:bg-muted/40 transition-colors"
-                onClick={() => {
-                  const next = new Set(expandedSubjects);
-                  isExpanded ? next.delete(subject.id) : next.add(subject.id);
-                  setExpandedSubjects(next);
-                }}
-              >
-                {isExpanded ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
-                <BookOpen className="w-4 h-4 text-primary" />
-                <span className="font-medium flex-1">{subject.name}</span>
-                <span className="text-xs text-muted-foreground mr-2">{pct}%</span>
-                <div className="w-20"><Progress value={pct} className="h-1.5" /></div>
-                <button onClick={(e) => { e.stopPropagation(); deleteSubject(subject.id); }} className="ml-2 text-muted-foreground hover:text-destructive transition-colors">
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              {/* Chapters */}
-              {isExpanded && (
-                <div className="border-t border-border">
-                  {subject.chapters.map((chapter) => {
-                    const chapterExpanded = expandedChapters.has(chapter.id);
-                    const chapterPct = chapter.topics.length > 0
-                      ? Math.round((chapter.topics.filter((t) => t.completed).length / chapter.topics.length) * 100)
-                      : 0;
-
-                    return (
-                      <div key={chapter.id} className="border-b border-border last:border-0">
-                        <div
-                          className="flex items-center gap-3 px-8 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
-                          onClick={() => {
-                            const next = new Set(expandedChapters);
-                            chapterExpanded ? next.delete(chapter.id) : next.add(chapter.id);
-                            setExpandedChapters(next);
-                          }}
-                        >
-                          {chapterExpanded ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />}
-                          <span className="text-sm font-medium flex-1">{chapter.name}</span>
-                          <span className="text-xs text-muted-foreground mr-2">{chapterPct}% · {chapter.topics.length} topics</span>
-                        </div>
-
-                        {chapterExpanded && (
-                          <div className="px-12 pb-3 space-y-1">
-                            {chapter.topics.map((topic) => (
-                              <div key={topic.id} className="flex items-center gap-3 py-2 group">
-                                <button
-                                  onClick={() => toggleTopic(topic)}
-                                  className={cn(
-                                    "w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-all",
-                                    topic.completed
-                                      ? "bg-primary border-primary"
-                                      : "border-muted-foreground/40 hover:border-primary"
-                                  )}
-                                >
-                                  {topic.completed && <Check className="w-2.5 h-2.5 text-primary-foreground" />}
-                                </button>
-                                <span className={cn("text-sm flex-1", topic.completed && "line-through text-muted-foreground")}>
-                                  {topic.name}
-                                </span>
-                                {topic.completed_at && (
-                                  <span className="text-xs text-muted-foreground">
-                                    {new Date(topic.completed_at).toLocaleDateString()}
-                                  </span>
-                                )}
-                                <button
-                                  onClick={() => setEditNotes({ id: topic.id, notes: topic.notes || "" })}
-                                  className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary transition-all"
-                                >
-                                  <FileText className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            ))}
-
-                            {/* Add Topic */}
-                            <Dialog open={addTopicOpen === chapter.id} onOpenChange={(o) => setAddTopicOpen(o ? chapter.id : null)}>
-                              <DialogTrigger asChild>
-                                <button className="flex items-center gap-2 text-xs text-muted-foreground hover:text-primary transition-colors py-1 mt-1">
-                                  <Plus className="w-3 h-3" /> Add Topic
-                                </button>
-                              </DialogTrigger>
-                              <DialogContent className="bg-card border-border">
-                                <DialogHeader><DialogTitle>Add Topic</DialogTitle></DialogHeader>
-                                <Input placeholder="Topic name" value={newTopicName} onChange={(e) => setNewTopicName(e.target.value)} className="bg-muted border-border" onKeyDown={(e) => e.key === "Enter" && addTopic(chapter.id)} />
-                                <Button onClick={() => addTopic(chapter.id)} className="gradient-primary text-primary-foreground">Add Topic</Button>
-                              </DialogContent>
-                            </Dialog>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-
-                  {/* Add Chapter */}
-                  <div className="px-8 py-3">
-                    <Dialog open={addChapterOpen === subject.id} onOpenChange={(o) => setAddChapterOpen(o ? subject.id : null)}>
-                      <DialogTrigger asChild>
-                        <button className="flex items-center gap-2 text-xs text-muted-foreground hover:text-primary transition-colors">
-                          <Plus className="w-3 h-3" /> Add Chapter
-                        </button>
-                      </DialogTrigger>
-                      <DialogContent className="bg-card border-border">
-                        <DialogHeader><DialogTitle>Add Chapter to {subject.name}</DialogTitle></DialogHeader>
-                        <Input placeholder="Chapter name" value={newChapterName} onChange={(e) => setNewChapterName(e.target.value)} className="bg-muted border-border" onKeyDown={(e) => e.key === "Enter" && addChapter(subject.id)} />
-                        <Button onClick={() => addChapter(subject.id)} className="gradient-primary text-primary-foreground">Add Chapter</Button>
-                      </DialogContent>
-                    </Dialog>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
+        ) : renderSubjectList(mySubjects, false)}
       </div>
+
+      {/* Other's Studies */}
+      {otherSubjects.length > 0 && (
+        <div>
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
+            <Eye className="w-3.5 h-3.5" /> Other's Studies
+          </h2>
+          {renderSubjectList(otherSubjects, true)}
+        </div>
+      )}
 
       {/* Notes dialog */}
       <Dialog open={!!editNotes} onOpenChange={(o) => !o && setEditNotes(null)}>
