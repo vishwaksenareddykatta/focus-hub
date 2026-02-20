@@ -42,7 +42,7 @@ const Login = () => {
           <div className="w-9 h-9 rounded-lg gradient-primary flex items-center justify-center glow">
             <LayoutDashboard className="w-5 h-5 text-primary-foreground" />
           </div>
-          <span className="text-xl font-semibold tracking-tight">Prodash</span>
+          <span className="text-xl font-semibold tracking-tight">D.O.P.E</span>
         </div>
 
         <div className="card-surface p-8">
@@ -88,7 +88,7 @@ const Login = () => {
         </div>
 
         <p className="text-center text-xs text-muted-foreground mt-6">
-          Personal productivity dashboard
+          Dashboard for Operations, Productions and Engineering
         </p>
       </div>
     </div>

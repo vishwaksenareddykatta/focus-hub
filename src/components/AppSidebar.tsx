@@ -38,7 +38,7 @@ const AppSidebar = () => {
         <div className="w-8 h-8 rounded-lg gradient-primary flex items-center justify-center shrink-0 glow-sm">
           <LayoutDashboard className="w-4 h-4 text-primary-foreground" />
         </div>
-        {!collapsed && <span className="font-semibold text-sm tracking-tight text-sidebar-accent-foreground">Prodash</span>}
+        {!collapsed && <span className="font-semibold text-sm tracking-tight text-sidebar-accent-foreground">D.O.P.E</span>}
       </div>
 
       {/* Nav */}
