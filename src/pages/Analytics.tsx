@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { getUserName } from "@/lib/userNames";
 import { BarChart3, BookOpen, Rocket, FolderKanban, TrendingUp, Target } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -7,6 +9,7 @@ import {
 } from "recharts";
 
 const Analytics = () => {
+  const { user } = useAuth();
   const [stats, setStats] = useState({
     topicsCompleted: 0, topicsTotal: 0,
     startupCompleted: 0, startupTotal: 0,
@@ -14,27 +17,39 @@ const Analytics = () => {
   });
 
   useEffect(() => {
-    const fetch = async () => {
-      const [{ data: topics }, { data: companyTasks }, { data: projectTasks }] = await Promise.all([
-        supabase.from("topics").select("completed, completed_at"),
+    if (!user) return;
+    const fetchData = async () => {
+      const [{ data: subjects }, { data: chapters }, { data: topics }, { data: companyTasks }, { data: projects }, { data: projectTasks }] = await Promise.all([
+        supabase.from("subjects").select("id, user_id"),
+        supabase.from("chapters").select("id, subject_id"),
+        supabase.from("topics").select("completed, completed_at, chapter_id"),
         supabase.from("company_tasks").select("status, completed_at"),
-        supabase.from("project_tasks").select("completed, completed_at"),
+        supabase.from("projects").select("id, user_id"),
+        supabase.from("project_tasks").select("completed, completed_at, project_id"),
       ]);
 
+      // Filter to current user's topics
+      const mySubjectIds = new Set((subjects || []).filter(s => s.user_id === user.id).map(s => s.id));
+      const myChapterIds = new Set((chapters || []).filter(c => mySubjectIds.has(c.subject_id!)).map(c => c.id));
+      const myTopics = (topics || []).filter(t => myChapterIds.has(t.chapter_id!));
+
+      // Filter to current user's project tasks
+      const myProjectIds = new Set((projects || []).filter(p => p.user_id === user.id).map(p => p.id));
+      const myProjectTasks = (projectTasks || []).filter(t => myProjectIds.has(t.project_id!));
+
       setStats({
-        topicsCompleted: topics?.filter(t => t.completed).length ?? 0,
-        topicsTotal: topics?.length ?? 0,
+        topicsCompleted: myTopics.filter(t => t.completed).length,
+        topicsTotal: myTopics.length,
         startupCompleted: companyTasks?.filter(t => t.status === "completed").length ?? 0,
         startupTotal: companyTasks?.length ?? 0,
-        projectCompleted: projectTasks?.filter(t => t.completed).length ?? 0,
-        projectTotal: projectTasks?.length ?? 0,
+        projectCompleted: myProjectTasks.filter(t => t.completed).length,
+        projectTotal: myProjectTasks.length,
       });
     };
-    fetch();
-  }, []);
+    fetchData();
+  }, [user]);
 
-  // Weekly breakdown (simulated from total data)
-  const weekData = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day, i) => ({
+  const weekData = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => ({
     day,
     study: Math.floor(Math.random() * Math.max(1, Math.ceil(stats.topicsCompleted / 5))),
     startup: Math.floor(Math.random() * Math.max(1, Math.ceil(stats.startupCompleted / 5))),
@@ -54,6 +69,7 @@ const Analytics = () => {
   ];
 
   const totalCompleted = stats.topicsCompleted + stats.startupCompleted + stats.projectCompleted;
+  const displayName = user ? getUserName(user.id) : "";
 
   const tooltipStyle = {
     contentStyle: {
@@ -68,17 +84,19 @@ const Analytics = () => {
   return (
     <div className="p-8 space-y-8 max-w-6xl">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
-        <p className="text-sm text-muted-foreground mt-1">Visualize your productivity</p>
+        <h1 className="text-2xl font-bold tracking-tight">{displayName}'s Analytics</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Studies & Projects are personal · Startup is shared
+        </p>
       </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { label: "Total Completed", value: totalCompleted, icon: Target, color: "text-primary" },
-          { label: "Study Topics Done", value: stats.topicsCompleted, icon: BookOpen, color: "text-primary" },
-          { label: "Startup Tasks Done", value: stats.startupCompleted, icon: Rocket, color: "text-purple-400" },
-          { label: "Project Tasks Done", value: stats.projectCompleted, icon: FolderKanban, color: "text-emerald-400" },
+          { label: "My Study Topics", value: stats.topicsCompleted, icon: BookOpen, color: "text-primary" },
+          { label: "Startup Tasks", value: stats.startupCompleted, icon: Rocket, color: "text-purple-400" },
+          { label: "My Project Tasks", value: stats.projectCompleted, icon: FolderKanban, color: "text-emerald-400" },
         ].map((item) => (
           <div key={item.label} className="card-surface p-4">
             <div className="flex items-center justify-between mb-2">

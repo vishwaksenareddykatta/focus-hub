@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { getUserName } from "@/lib/userNames";
 import { BookOpen, Rocket, FolderKanban, TrendingUp, CheckCircle2 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
@@ -16,7 +18,7 @@ interface DashboardStats {
 const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 const generateWeekData = (completed: number) => {
-  return weekDays.map((day, i) => ({
+  return weekDays.map((day) => ({
     day,
     tasks: Math.max(0, Math.floor((completed / 7) * (0.5 + Math.random()))),
   }));
@@ -56,6 +58,7 @@ const StatCard = ({
 };
 
 const Dashboard = () => {
+  const { user } = useAuth();
   const [stats, setStats] = useState<DashboardStats>({
     topicsCompleted: 0,
     topicsTotal: 0,
@@ -66,26 +69,38 @@ const Dashboard = () => {
   });
 
   useEffect(() => {
+    if (!user) return;
     const fetchStats = async () => {
-      const [topics, companyTasks, projectTasks] = await Promise.all([
-        supabase.from("topics").select("completed"),
+      // Fetch subjects owned by current user to filter their topics
+      const [{ data: subjects }, { data: chapters }, { data: topics }, { data: companyTasks }, { data: projects }, { data: projectTasks }] = await Promise.all([
+        supabase.from("subjects").select("id, user_id"),
+        supabase.from("chapters").select("id, subject_id"),
+        supabase.from("topics").select("completed, chapter_id"),
         supabase.from("company_tasks").select("status"),
-        supabase.from("project_tasks").select("completed"),
+        supabase.from("projects").select("id, user_id"),
+        supabase.from("project_tasks").select("completed, project_id"),
       ]);
 
+      // Filter topics to only current user's subjects
+      const mySubjectIds = new Set((subjects || []).filter(s => s.user_id === user.id).map(s => s.id));
+      const myChapterIds = new Set((chapters || []).filter(c => mySubjectIds.has(c.subject_id!)).map(c => c.id));
+      const myTopics = (topics || []).filter(t => myChapterIds.has(t.chapter_id!));
+
+      // Filter project tasks to only current user's projects
+      const myProjectIds = new Set((projects || []).filter(p => p.user_id === user.id).map(p => p.id));
+      const myProjectTasks = (projectTasks || []).filter(t => myProjectIds.has(t.project_id!));
+
       setStats({
-        topicsCompleted: topics.data?.filter((t) => t.completed).length ?? 0,
-        topicsTotal: topics.data?.length ?? 0,
-        startupTasksCompleted:
-          companyTasks.data?.filter((t) => t.status === "completed").length ?? 0,
-        startupTasksTotal: companyTasks.data?.length ?? 0,
-        projectTasksCompleted:
-          projectTasks.data?.filter((t) => t.completed).length ?? 0,
-        projectTasksTotal: projectTasks.data?.length ?? 0,
+        topicsCompleted: myTopics.filter(t => t.completed).length,
+        topicsTotal: myTopics.length,
+        startupTasksCompleted: companyTasks?.filter(t => t.status === "completed").length ?? 0,
+        startupTasksTotal: companyTasks?.length ?? 0,
+        projectTasksCompleted: myProjectTasks.filter(t => t.completed).length,
+        projectTasksTotal: myProjectTasks.length,
       });
     };
     fetchStats();
-  }, []);
+  }, [user]);
 
   const weekData = generateWeekData(
     stats.topicsCompleted + stats.startupTasksCompleted + stats.projectTasksCompleted
@@ -96,11 +111,13 @@ const Dashboard = () => {
   const totalTasks =
     stats.topicsTotal + stats.startupTasksTotal + stats.projectTasksTotal;
 
+  const displayName = user ? getUserName(user.id) : "";
+
   return (
     <div className="p-8 space-y-8 max-w-6xl">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Welcome, {displayName}</h1>
         <p className="text-sm text-muted-foreground mt-1">
           Your personal productivity overview
         </p>
@@ -132,21 +149,21 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatCard
           icon={BookOpen}
-          label="Study Topics"
+          label="My Study Topics"
           value={stats.topicsCompleted}
           total={stats.topicsTotal}
           color="bg-primary/15 text-primary"
         />
         <StatCard
           icon={Rocket}
-          label="Startup Tasks"
+          label="Startup Tasks (Shared)"
           value={stats.startupTasksCompleted}
           total={stats.startupTasksTotal}
           color="bg-purple-500/15 text-purple-400"
         />
         <StatCard
           icon={FolderKanban}
-          label="Project Tasks"
+          label="My Project Tasks"
           value={stats.projectTasksCompleted}
           total={stats.projectTasksTotal}
           color="bg-emerald-500/15 text-emerald-400"
