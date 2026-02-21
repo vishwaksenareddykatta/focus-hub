@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Plus, ChevronRight, ChevronDown, FolderKanban, Trash2, Check, Pencil, Eye } from "lucide-react";
+import { getOtherUserName } from "@/lib/userNames";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -339,7 +340,7 @@ const Projects = () => {
       {otherProjects.length > 0 && (
         <div>
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
-            <Eye className="w-3.5 h-3.5" /> Other's Projects
+            <Eye className="w-3.5 h-3.5" /> {user ? getOtherUserName(user.id) : "Other"}'s Projects
           </h2>
           {renderProjectList(otherProjects, true)}
         </div>
